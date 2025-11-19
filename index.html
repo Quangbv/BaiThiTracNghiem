@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trắc nghiệm Hiến pháp Việt Nam (AI Powered)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Markdown Parser for AI responses -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .option-card { transition: all 0.2s; }
+        .option-card:active { transform: scale(0.98); }
+        
+        /* AI Response Styling */
+        .ai-content h3 { font-weight: bold; margin-top: 0.5em; margin-bottom: 0.2em; }
+        .ai-content ul { list-style-type: disc; margin-left: 1.5em; }
+        .ai-content p { margin-bottom: 0.5em; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4 select-none">
+
+    <div id="app" class="w-full max-w-2xl mx-auto">
+        <!-- Loading State -->
+        <div id="loading" class="text-center text-gray-500 text-xl">
+            <i class="fas fa-spinner fa-spin mr-2"></i> Đang tải ứng dụng...
+        </div>
+    </div>
+
+    <!-- Load Quiz Data from separate file -->
+    <script src="data.js"></script>
+
+    <script>
+        // === API CONFIGURATION ===
+        const apiKey = ""; // API Key will be injected by the environment
+
+        // === GEMINI API HELPER ===
+        async function callGemini(prompt) {
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{ text: prompt }]
+                        }]
+                    })
+                });
+
+                if (!response.ok) throw new Error('Network response was not ok');
+                
+                const data = await response.json();
+                return data.candidates[0].content.parts[0].text;
+            } catch (error) {
+                console.error('Error calling Gemini:', error);
+                return "Xin lỗi, tôi không thể kết nối với AI lúc này. Vui lòng thử lại sau.";
+            }
+        }
+
+        // === LOGIC ỨNG DỤNG ===
+        class QuizApp {
+            constructor() {
+                // Kiểm tra xem file data.js đã load chưa
+                if (typeof rawQuizData === 'undefined') {
+                    document.getElementById('loading').innerHTML = "Lỗi: Không tìm thấy file data.js. Vui lòng đảm bảo cả 2 file ở cùng thư mục.";
+                    return;
+                }
+                
+                this.allQuestions = this.transformData(rawQuizData);
+                this.questions = [];
+                this.currentIndex = 0;
+                this.score = 0;
+                this.wrongAnswers = [];
+                this.isReviewing = false;
+                
+                this.appEl = document.getElementById('app');
+                this.init();
+            }
+
+            transformData(data) {
+                return data.Qj.map((item, index) => ({
+                    id: index,
+                    question: item.question,
+                    hint: item.hint,
+                    options: item.yB.map(opt => ({
+                        text: opt.text,
+                        isCorrect: opt.nv,
+                        rationale: opt.zK
+                    }))
+                }));
+            }
+
+            shuffleArray(array) {
+                for (let i = array.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [array[i], array[j]] = [array[j], array[i]];
+                }
+                return array;
+            }
+
+            init() {
+                this.renderStartScreen();
+            }
+
+            startQuiz() {
+                this.questions = this.shuffleArray([...this.allQuestions]);
+                this.currentIndex = 0;
+                this.score = 0;
+                this.wrongAnswers = [];
+                this.isReviewing = false;
+                this.renderQuestion();
+            }
+
+            renderStartScreen() {
+                this.appEl.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-lg p-8 text-center fade-in">
+                        <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <i class="fas fa-book-open text-blue-600 text-3xl"></i>
+                        </div>
+                        <h1 class="text-2xl font-bold text-gray-800 mb-4">Trắc nghiệm Hiến pháp Việt Nam</h1>
+                        <div class="inline-block bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm font-semibold mb-4 border border-blue-200">
+                            <i class="fas fa-sparkles text-yellow-400 mr-1"></i> Tích hợp Gemini AI
+                        </div>
+                        <p class="text-gray-600 mb-8">Bộ câu hỏi gồm ${this.allQuestions.length} câu. Hệ thống sẽ tự động đảo câu hỏi mỗi lần thi.</p>
+                        <button onclick="app.startQuiz()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-lg shadow transition duration-200 transform active:scale-95">
+                            Bắt đầu làm bài
+                        </button>
+                    </div>
+                `;
+            }
+
+            renderQuestion() {
+                const q = this.questions[this.currentIndex];
+                const shuffledOptions = this.isReviewing ? q.options : this.shuffleArray([...q.options]);
+
+                this.appEl.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-lg overflow-hidden fade-in">
+                        <!-- Header -->
+                        <div class="bg-blue-600 p-4 text-white flex justify-between items-center">
+                            <span class="font-semibold">Câu ${this.currentIndex + 1}/${this.questions.length}</span>
+                            <span class="text-sm bg-blue-500 px-2 py-1 rounded">Điểm: ${this.score}</span>
+                        </div>
+                        
+                        <!-- Question Body -->
+                        <div class="p-6">
+                            <h2 class="text-xl font-medium text-gray-800 mb-6 leading-relaxed">${q.question}</h2>
+                            
+                            <!-- Options Container -->
+                            <div class="space-y-3" id="options-container">
+                                ${shuffledOptions.map((opt, idx) => `
+                                    <div onclick="app.handleAnswer(${idx}, ${opt.isCorrect})" 
+                                         class="option-card p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-400 hover:bg-blue-50 flex items-start gap-3"
+                                         id="opt-${idx}">
+                                        <div class="mt-1 w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center shrink-0 text-xs font-bold text-gray-500 option-idx">
+                                            ${String.fromCharCode(65 + idx)}
+                                        </div>
+                                        <span class="text-gray-700">${opt.text}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+
+                            <!-- Inline Feedback Section (Initially Hidden) -->
+                            <div id="inline-feedback" class="hidden mt-6 p-5 bg-gray-50 rounded-xl border border-gray-200 fade-in">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <div id="feedback-icon" class="text-2xl"></div>
+                                    <h3 id="feedback-title" class="text-lg font-bold"></h3>
+                                </div>
+                                <p id="feedback-rationale" class="text-gray-700 mb-4 leading-relaxed"></p>
+
+                                <!-- AI Explanation Area -->
+                                <div id="ai-explanation-area" class="mb-4 hidden">
+                                    <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-4 text-sm text-gray-800 ai-content">
+                                        <div id="ai-loading" class="flex items-center space-x-2 text-indigo-600">
+                                            <i class="fas fa-circle-notch fa-spin"></i> 
+                                            <span>AI đang phân tích luật...</span>
+                                        </div>
+                                        <div id="ai-text" class="hidden"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Action Buttons -->
+                                <div class="flex flex-col sm:flex-row gap-3 mt-4">
+                                    <button onclick="app.askGeminiExplanation()" id="btn-ask-ai" class="flex-1 bg-indigo-100 text-indigo-700 py-2 px-4 rounded-lg font-semibold hover:bg-indigo-200 transition border border-indigo-200 text-center">
+                                        <i class="fas fa-sparkles text-yellow-500 mr-2"></i> Giải thích AI
+                                    </button>
+                                    <button onclick="app.nextQuestion()" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg font-semibold hover:bg-blue-700 transition text-center shadow-md">
+                                        Câu tiếp theo <i class="fas fa-arrow-right ml-2"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Hint Section -->
+                            <div class="mt-6 pt-4 border-t border-gray-100">
+                                <button onclick="document.getElementById('hint-box').classList.toggle('hidden')" class="text-yellow-600 text-sm hover:underline flex items-center gap-1">
+                                    <i class="far fa-lightbulb"></i> Gợi ý
+                                </button>
+                                <div id="hint-box" class="hidden mt-2 p-3 bg-yellow-50 text-yellow-800 text-sm rounded border border-yellow-200">
+                                    💡 ${q.hint}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            handleAnswer(selectedIndex, isCorrect) {
+                const q = this.questions[this.currentIndex];
+                const selectedOption = q.options[selectedIndex];
+                const correctOpt = q.options.find(o => o.isCorrect);
+                
+                // 1. Disable click on options
+                const optionEls = document.querySelectorAll('.option-card');
+                optionEls.forEach(el => {
+                    el.style.pointerEvents = 'none';
+                    el.classList.remove('hover:border-blue-400', 'hover:bg-blue-50', 'cursor-pointer');
+                });
+                
+                const selectedEl = document.getElementById(`opt-${selectedIndex}`);
+                
+                // 2. Highlight options
+                if (isCorrect) {
+                    selectedEl.classList.remove('border-gray-200');
+                    selectedEl.classList.add('border-green-500', 'bg-green-50');
+                    selectedEl.querySelector('.option-idx').classList.add('border-green-500', 'text-green-600', 'bg-white');
+                    this.score++;
+                } else {
+                    selectedEl.classList.remove('border-gray-200');
+                    selectedEl.classList.add('border-red-500', 'bg-red-50');
+                    selectedEl.querySelector('.option-idx').classList.add('border-red-500', 'text-red-600', 'bg-white');
+                    
+                    // Highlight correct answer if wrong
+                    // Tìm index của đáp án đúng trong DOM (vì options đã bị shuffle)
+                    // Ở đây q.options đã là shuffled list trong render logic, nhưng ta cần duyệt lại DOM
+                    // Cách đơn giản: Loop qua options hiện tại của question object (đã shuffle) để tìm index
+                    q.options.forEach((opt, idx) => {
+                        if(opt.isCorrect) {
+                             const correctEl = document.getElementById(`opt-${idx}`);
+                             if(correctEl) {
+                                correctEl.classList.remove('border-gray-200');
+                                correctEl.classList.add('border-green-500', 'bg-green-50');
+                                correctEl.querySelector('.option-idx').classList.add('border-green-500', 'text-green-600', 'bg-white');
+                             }
+                        }
+                    });
+
+                    this.wrongAnswers.push({
+                        question: q.question,
+                        userAns: selectedOption.text,
+                        correctAns: correctOpt.text,
+                        rationale: correctOpt.rationale
+                    });
+                }
+
+                // 3. Show Inline Feedback
+                const feedbackBox = document.getElementById('inline-feedback');
+                const icon = document.getElementById('feedback-icon');
+                const title = document.getElementById('feedback-title');
+                const rationale = document.getElementById('feedback-rationale');
+
+                feedbackBox.classList.remove('hidden');
+
+                if (isCorrect) {
+                    feedbackBox.classList.add('bg-green-50', 'border-green-100');
+                    feedbackBox.classList.remove('bg-red-50', 'border-red-100');
+                    icon.innerHTML = '<i class="fas fa-check-circle text-green-600"></i>';
+                    title.innerText = "Chính xác!";
+                    title.className = "text-lg font-bold text-green-700";
+                    rationale.innerText = selectedOption.rationale || "Bạn đã nắm vững kiến thức này.";
+                } else {
+                    feedbackBox.classList.add('bg-red-50', 'border-red-100');
+                    feedbackBox.classList.remove('bg-green-50', 'border-green-100');
+                    icon.innerHTML = '<i class="fas fa-times-circle text-red-600"></i>';
+                    title.innerText = "Chưa chính xác";
+                    title.className = "text-lg font-bold text-red-700";
+                    rationale.innerHTML = `<span class="font-semibold text-gray-800">Đáp án đúng: ${correctOpt.text}</span><br><br>${correctOpt.rationale}`;
+                }
+            }
+
+            async askGeminiExplanation() {
+                const q = this.questions[this.currentIndex];
+                const correctOpt = q.options.find(o => o.isCorrect);
+                
+                const btn = document.getElementById('btn-ask-ai');
+                const area = document.getElementById('ai-explanation-area');
+                const loading = document.getElementById('ai-loading');
+                const textDiv = document.getElementById('ai-text');
+
+                btn.classList.add('hidden');
+                area.classList.remove('hidden');
+                loading.classList.remove('hidden');
+                textDiv.classList.add('hidden');
+
+                const prompt = `
+                    Bạn là một chuyên gia luật và giảng viên Hiến pháp Việt Nam.
+                    Hãy giải thích ngắn gọn, dễ hiểu cho sinh viên về câu hỏi trắc nghiệm sau:
+                    
+                    Câu hỏi: "${q.question}"
+                    Đáp án đúng: "${correctOpt.text}"
+                    
+                    Yêu cầu:
+                    1. Giải thích tại sao đáp án này đúng dựa trên Hiến pháp 2013.
+                    2. Nêu ngắn gọn ý nghĩa hoặc vai trò của quy định này trong bộ máy nhà nước.
+                    3. Dùng giọng văn thân thiện, khuyến khích học tập.
+                    4. Trả lời ngắn gọn trong khoảng 100 từ.
+                `;
+
+                const explanation = await callGemini(prompt);
+                
+                loading.classList.add('hidden');
+                textDiv.innerHTML = marked.parse(explanation);
+                textDiv.classList.remove('hidden');
+            }
+
+            nextQuestion() {
+                this.currentIndex++;
+                if (this.currentIndex < this.questions.length) {
+                    this.renderQuestion();
+                } else {
+                    this.renderResult();
+                }
+            }
+
+            renderResult() {
+                const percent = Math.round((this.score / this.questions.length) * 100);
+                let message = "";
+                if (percent >= 90) message = "Xuất sắc! Bạn nắm rất chắc Hiến pháp.";
+                else if (percent >= 70) message = "Làm tốt lắm! Hãy ôn lại vài câu sai nhé.";
+                else message = "Cần cố gắng hơn! Hãy ôn tập lại tài liệu.";
+
+                this.appEl.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-lg p-8 text-center fade-in">
+                        <div class="mb-6">
+                            <div class="inline-block p-6 rounded-full border-4 ${percent >= 70 ? 'border-green-500 text-green-500' : 'border-orange-500 text-orange-500'} text-4xl font-bold">
+                                ${this.score}/${this.questions.length}
+                            </div>
+                        </div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">Kết quả của bạn</h2>
+                        <p class="text-gray-600 mb-8">${message}</p>
+                        
+                        <!-- AI Analysis Section -->
+                        <div id="ai-analysis-container" class="mb-6 hidden text-left">
+                            <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
+                                <h3 class="font-bold text-indigo-800 mb-2 flex items-center">
+                                    <i class="fas fa-robot mr-2"></i> Phân tích từ AI Mentor
+                                </h3>
+                                <div id="ai-analysis-content" class="text-gray-700 text-sm space-y-2 ai-content">
+                                    <div class="flex items-center gap-2 text-indigo-500">
+                                        <i class="fas fa-spinner fa-spin"></i> Đang phân tích điểm yếu...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid gap-4">
+                            ${this.wrongAnswers.length > 0 ? `
+                                <button onclick="app.analyzePerformance()" id="btn-analyze" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow transition animate-pulse">
+                                    <i class="fas fa-chart-line mr-2"></i> <i class="fas fa-sparkles text-yellow-300 mr-1"></i> Phân tích điểm yếu & Lời khuyên
+                                </button>
+                            ` : ''}
+                            
+                            <button onclick="app.startQuiz()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow transition">
+                                <i class="fas fa-redo mr-2"></i> Làm lại bài thi
+                            </button>
+                            ${this.wrongAnswers.length > 0 ? `
+                                <button onclick="app.renderReview()" class="bg-white border border-gray-300 text-gray-700 font-bold py-3 px-4 rounded-lg hover:bg-gray-50 transition">
+                                    Xem lại ${this.wrongAnswers.length} câu sai
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+
+            async analyzePerformance() {
+                const btn = document.getElementById('btn-analyze');
+                const container = document.getElementById('ai-analysis-container');
+                const content = document.getElementById('ai-analysis-content');
+
+                btn.classList.add('hidden');
+                container.classList.remove('hidden');
+
+                // Prepare data for AI
+                const weakTopics = this.wrongAnswers.map(w => w.question).join("\n- ");
+                
+                const prompt = `
+                    Dựa trên danh sách các câu hỏi sai dưới đây về Hiến pháp Việt Nam, hãy đóng vai một người thầy tận tâm:
+                    1. Chỉ ra 2-3 mảng kiến thức chính mà học sinh đang yếu (Ví dụ: Chức năng Quốc hội, Nhiệm vụ Chủ tịch nước, hay Chính quyền địa phương...)
+                    2. Đưa ra 3 lời khuyên ôn tập cụ thể, ngắn gọn để cải thiện.
+                    3. Giọng văn khích lệ.
+
+                    Danh sách câu sai:
+                    - ${weakTopics}
+                `;
+
+                const analysis = await callGemini(prompt);
+                content.innerHTML = marked.parse(analysis);
+            }
+
+            renderReview() {
+                this.appEl.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-lg overflow-hidden fade-in max-h-[90vh] flex flex-col">
+                        <div class="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
+                            <span class="font-bold"><i class="fas fa-history mr-2"></i> Các câu cần ôn tập</span>
+                            <button onclick="app.renderResult()" class="text-white hover:bg-orange-600 p-1 rounded"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="p-4 overflow-y-auto">
+                            ${this.wrongAnswers.map((item, idx) => `
+                                <div class="mb-6 pb-6 border-b border-gray-100 last:border-0">
+                                    <div class="font-medium text-gray-800 mb-2">Câu ${idx + 1}: ${item.question}</div>
+                                    <div class="text-red-600 text-sm mb-1"><i class="fas fa-times mr-1"></i> Bạn chọn: ${item.userAns}</div>
+                                    <div class="text-green-600 text-sm font-medium mb-2"><i class="fas fa-check mr-1"></i> Đáp án đúng: ${item.correctAns}</div>
+                                    <div class="bg-gray-50 p-3 rounded text-sm text-gray-600 italic">"${item.rationale}"</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="p-4 border-t border-gray-100 shrink-0">
+                            <button onclick="app.renderResult()" class="w-full bg-gray-800 text-white py-3 rounded-lg">Quay lại kết quả</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        const app = new QuizApp();
+    </script>
+</body>
+</html>
